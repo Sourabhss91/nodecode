@@ -1,0 +1,127 @@
+{
+	"swagger": "2.0",
+	"info": {
+		"description": "APP",
+		"version": "1.0.0",
+		"title": "APP",
+		"contact": {
+			"email": "apiteam@swagger.io"
+		},
+		"license": {
+			"name": "Apache 2.0",
+			"url": "http://www.apache.org/licenses/LICENSE-2.0.html"
+		}
+	},
+	"host": "localhost:3000",
+	"basePath": "",
+	"tags": [
+		{
+			"name": "User",
+			"description": "Social Login, Logout and Signup api's"
+		}
+	],
+	"schemes": [
+		"http",
+		"https"
+	],
+	"securityDefinitions": {
+		"api_key": {
+			"type": "apiKey",
+			"name": "authorization",
+			"in": "header"
+		}
+	},
+	"paths":{
+		"/v1/sme/oauth/signin": {
+			"post": {
+				"tags": [
+					"SME"
+				],
+				"summary": "User signin",
+				"description": "User signin",
+				"operationId": "",
+				"consumes": [
+					"application/json"
+				],
+				"produces": [
+					"application/json"
+				],
+				"security": [
+					{
+						"api_key": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "Parameters",
+						"in": "body",
+						"description": "User signin",
+						"required": true,
+						"schema": {
+							"$ref": "#/definitions/UserSignin"
+						}
+					}
+				],
+				"responses": {}
+			}
+		},
+		"/v1/sme/{id}/uploadSoundFile": {
+            "post": {
+                "tags": [
+                    "File Upload"
+                ],
+                "summary": "File Upload",
+                "description": "File Upload",
+                "operationId": "",
+                "consumes": [
+                    "multipart/form-data"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "security": [
+                    {
+                        "api_key": []
+                    }
+                ],
+                "parameters": [
+                    {
+                        "in": "formData",
+                        "name": "soundFile",
+                        "description": "The file to upload.",
+                        "required": true,
+                        "type": "file"
+                    },
+                    {
+                        "in": "formData",
+                        "name": "id",
+                        "description": "Sme id",
+                        "required": true,
+                        "type": "number"
+                    }
+                ],
+                "responses": {}
+            }
+        }
+	},
+	"definitions":{
+		"UserSignin": {
+			"properties": {
+				"username": {
+					"required": [
+						"true"
+					],
+					"type": "string",
+					"example": "20002002"
+				},
+				"password": {
+					"required": [
+						"true"
+					],
+					"type": "string",
+					"example": "Wringg@20002002"
+				}
+			}
+		}
+	}
+}

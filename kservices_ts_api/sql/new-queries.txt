@@ -1,0 +1,7 @@
+ALTER TABLE `users` 
+ADD UNIQUE INDEX `username_UNIQUE` (`username` ASC) VISIBLE;
+
+
+ALTER TABLE  `users` 
+CHANGE COLUMN `user_token` `user_token` MEDIUMTEXT NULL DEFAULT NULL ;
+

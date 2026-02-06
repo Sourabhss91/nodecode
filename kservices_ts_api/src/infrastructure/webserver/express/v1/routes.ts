@@ -1,0 +1,30 @@
+import express, { Request, Response } from "express";
+import { ApiDocsRoute } from "../../../../api/interface/routes/v1/apiDocs";
+import { SMERoute } from "../../../../api/interface/routes/v1/sme";
+import { AgentRoute } from "../../../../api/interface/routes/v1/agent";
+import { CommonRoute } from "../../../../api/interface/routes/v1/common";
+import { S3Route } from "../../../../api/interface/routes/v1/s3";
+import { IVR } from "../../../../api/interface/routes/v1/ivr";
+import { CRM } from "../../../../api/interface/routes/v1/crm";
+import { Mobileapp } from "../../../../api/interface/routes/v1/mobileapp";
+import { adminRoute } from "../../../../api/interface/routes/v1/admin";
+import { PaymentRoute } from "../../../../api/interface/routes/v1/payment";
+import { BigQuery } from "../../../../api/interface/routes/v1/bigQuery";
+import { Reseller } from "../../../../api/interface/routes/v1/reseller";
+/** crate global router */
+export const createRouter = (): express.Router => {
+  const router = express.Router();
+  ApiDocsRoute(router);
+  SMERoute(router);
+  AgentRoute(router);
+  CommonRoute(router);
+  S3Route(router);
+  IVR(router);
+  CRM(router);
+  Mobileapp(router);
+  adminRoute(router);
+  PaymentRoute(router);
+  BigQuery(router);
+  Reseller(router);
+  return router;
+};
