@@ -49,7 +49,7 @@ pipeline {
                 echo "=========================================================="
                 
                 // Clean install dependencies and run build script (e.g., tsc or esbuild)
-                sh 'npm ci'
+                //sh 'npm ci'
                 sh 'npm run build'
             }
         }
@@ -68,13 +68,7 @@ pipeline {
                 echo "[INFO] Copying compiled files to release directory..."
                 sh "cp -r build/* ${env.RELEASE_PATH}/"
 
-                // 3. Inject production .env file from Jenkins Credentials Store
-                echo "[INFO] Injecting .env.prod file..."
-                withCredentials([file(credentialsId: env.ENV_SECRET_ID, variable: 'PROD_ENV_FILE')]) {
-                    sh "cp \$PROD_ENV_FILE ${env.TARGET_APP_ROOT}/.env.prod"
-                }
-
-                // 4. Atomically switch the 'build' symlink to point to the new build folder
+                // 3. Atomically switch the 'build' symlink to point to the new build folder
                 echo "[INFO] Atomically updating symlink: ${env.TARGET_APP_ROOT}/build -> ${env.RELEASE_PATH}"
                 sh "ln -sfn ${env.RELEASE_PATH} ${env.TARGET_APP_ROOT}/build"
             }
@@ -87,14 +81,28 @@ pipeline {
             steps {
                 echo "[INFO] Reloading PM2 process '${params.APP_NAME}'..."
                 
-                // Reload process with zero downtime, or start it if it isn't running yet
                 sh """
                     cd ${env.TARGET_APP_ROOT}
-                    pm2 reload ${params.APP_NAME} --env production || pm2 start build/index.js --name ${params.APP_NAME} --env production
+
+                    if pm2 list | grep -qw "${params.APP_NAME}"; then
+                        echo "[INFO] Reloading existing process..."
+                        pm2 reload ${params.APP_NAME} --update-env
+                    else
+                        echo "[INFO] Starting new process..."
+                        pm2 start build/index.js --name ${params.APP_NAME} --node-args="-r dotenv/config" -- dotenv_config_path=.env.prod
+                    fi
+
+                    sleep 2
+
+                    if pm2 list | grep "${params.APP_NAME}" | grep -q "online"; then
+                        echo "[SUCCESS] ${params.APP_NAME} is running!"
+                    else
+                        echo "[ERROR] ${params.APP_NAME} failed to stay online!"
+                        exit 1
+                    fi
                 """
 
-                // Clean up old builds (retains the latest N releases)
-                echo "[INFO] Cleaning up older releases (keeping latest ${params.KEEP_RELEASES})..."
+                // Clean up old builds (retains latest N releases)
                 sh """
                     cd ${env.RELEASES_DIR} && ls -dt */ | tail -n +\$((${params.KEEP_RELEASES} + 1)) | xargs -I {} rm -rf {}
                 """
