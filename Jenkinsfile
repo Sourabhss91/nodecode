@@ -95,10 +95,10 @@ pipeline {
 
                     if pm2 list | grep -qw "${params.APP_NAME}"; then
                         echo "[INFO] Reloading existing process..."
-                        sudo pm2 reload ${params.APP_NAME} --update-env
+                        pm2 reload ${params.APP_NAME} --update-env
                     else
                         echo "[INFO] Starting new process..."
-                        sudo pm2 start build/index.js --name ${params.APP_NAME} --node-args="-r dotenv/config" -- dotenv_config_path=.env.prod
+                        pm2 start build/index.js --name ${params.APP_NAME} --node-args="-r dotenv/config" -- dotenv_config_path=.env.prod
                     fi
 
                     sleep 2
