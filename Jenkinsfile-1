@@ -1,0 +1,199 @@
+pipeline {
+    agent any
+
+    // -------------------------------------------------------------------------
+    // PARAMETERS & INPUT CONTROLS
+    // Enables manual or automated triggers with targeted application control
+    // -------------------------------------------------------------------------
+    parameters {
+        choice(name: 'DEPLOY_ENV', choices: ['prod', 'staging'], description: 'Target deployment environment')
+        string(name: 'APP_NAME', defaultValue: 'my_app', description: 'Application target folder and PM2 name')
+        booleanParam(name: 'DEPLOY_ANGULAR', defaultValue: true, description: 'Deploy Angular Frontend?')
+        booleanParam(name: 'DEPLOY_NODE', defaultValue: true, description: 'Deploy Express Node.js API?')
+        booleanParam(name: 'DEPLOY_TOMCAT', defaultValue: false, description: 'Deploy Tomcat WAR package?')
+        string(name: 'KEEP_RELEASES', defaultValue: '5', description: 'Number of historical releases to preserve on target VMs')
+    }
+
+    // -------------------------------------------------------------------------
+    // ENVIRONMENT & CREDENTIAL MANAGEMENT
+    // Centralized path references and server target definitions
+    // -------------------------------------------------------------------------
+    environment {
+        // Jenkins Credential IDs
+        SSH_CRED_ID    = 'pbx-ssh-key'                         // SSH Private Key for target VM authentication
+        ENV_SECRET_ID  = "express-${params.APP_NAME}-env-prod" // Secret file credential containing .env.prod
+
+        // Target Server Infrastructure Lists (Comma-separated IPs or hostnames)
+        FE_SERVERS     = '192.168.1.10,192.168.1.11'
+        NODE_SERVERS   = '192.168.1.20,192.168.1.21'
+        TOMCAT_SERVERS = '192.168.1.30'
+
+        // Base Paths
+        BASE_LB_PATH   = '/home/pbx/komm/load_balancer'
+        BASE_REL_PATH  = '/home/pbx/komm/releases'
+    }
+
+    stages {
+        stage('Parallel Build & Release Deploy') {
+            parallel {
+
+                // =============================================================
+                // 1. ANGULAR 18 FRONTEND PIPELINE
+                // =============================================================
+                stage('Angular Frontend') {
+                    when { expression { return params.DEPLOY_ANGULAR } }
+                    steps {
+                        script {
+                            echo "[INFO] Starting Angular Build for '${params.APP_NAME}'..."
+                        }
+                        dir('frontend') {
+                            // Install dependencies and compile production assets
+                            sh 'npm ci'
+                            sh 'npx ng build --configuration=production'
+                            
+                            sshagent([env.SSH_CRED_ID]) {
+                                sh '''
+                                    set -e
+                                    FE_TARGET_LINK="${BASE_LB_PATH}/angular/${APP_NAME}/dist"
+                                    REL_DIR="${BASE_REL_PATH}/angular/${APP_NAME}/${BUILD_NUMBER}"
+
+                                    for ip in $(echo $FE_SERVERS | tr "," " "); do
+                                        echo "-------------------------------------------------------"
+                                        echo "[INFO] Deploying Angular Build #${BUILD_NUMBER} to FE Host: ${ip}"
+                                        echo "-------------------------------------------------------"
+
+                                        # 1. Create release directory on target host
+                                        ssh -o StrictHostKeyChecking=no pbx@$ip "mkdir -p ${REL_DIR}"
+
+                                        # 2. Rsync build artifacts to the release directory
+                                        rsync -avz --delete dist/${APP_NAME}/ pbx@$ip:${REL_DIR}/
+
+                                        # 3. Atomically switch 'dist' symlink to new release
+                                        ssh pbx@$ip "mkdir -p $(dirname ${FE_TARGET_LINK}) && ln -sfn ${REL_DIR} ${FE_TARGET_LINK}"
+
+                                        # 4. Cleanup older releases (preserve last N)
+                                        ssh pbx@$ip "cd ${BASE_REL_PATH}/angular/${APP_NAME} && ls -dt */ | tail -n +$((${KEEP_RELEASES} + 1)) | xargs -I {} rm -rf {}"
+                                        
+                                        echo "[SUCCESS] Angular host ${ip} updated to release #${BUILD_NUMBER}."
+                                    done
+                                '''
+                            }
+                        }
+                    }
+                }
+
+                // =============================================================
+                // 2. NODE.JS EXPRESS API PIPELINE
+                // =============================================================
+                stage('Node.js Express API') {
+                    when { expression { return params.DEPLOY_NODE } }
+                    steps {
+                        script {
+                            echo "[INFO] Starting Node.js API Build for '${params.APP_NAME}'..."
+                        }
+                        dir('express-api') {
+                            // Clean install and build TypeScript / bundled JavaScript
+                            sh 'npm ci'
+                            sh 'npm run build'
+
+                            withCredentials([file(credentialsId: env.ENV_SECRET_ID, variable: 'PROD_ENV_FILE')]) {
+                                sshagent([env.SSH_CRED_ID]) {
+                                    sh '''
+                                        set -e
+                                        NODE_APP_ROOT="${BASE_LB_PATH}/express/${APP_NAME}"
+                                        REL_DIR="${BASE_REL_PATH}/express/${APP_NAME}/${BUILD_NUMBER}"
+
+                                        for ip in $(echo $NODE_SERVERS | tr "," " "); do
+                                            echo "-------------------------------------------------------"
+                                            echo "[INFO] Deploying Node API Build #${BUILD_NUMBER} to API Host: ${ip}"
+                                            echo "-------------------------------------------------------"
+
+                                            # 1. Create target release and app root directories
+                                            ssh -o StrictHostKeyChecking=no pbx@$ip "mkdir -p ${REL_DIR} ${NODE_APP_ROOT}"
+
+                                            # 2. Transfer compiled code and inject secure environment file
+                                            echo "[INFO] Syncing compiled files & .env.prod to ${ip}..."
+                                            rsync -avz --delete build/ pbx@$ip:${REL_DIR}/
+                                            scp $PROD_ENV_FILE pbx@$ip:${NODE_APP_ROOT}/.env.prod
+
+                                            # 3. Atomically update 'build' directory symlink
+                                            echo "[INFO] Updating release symlink on ${ip}..."
+                                            ssh pbx@$ip "ln -sfn ${REL_DIR} ${NODE_APP_ROOT}/build"
+
+                                            # 4. Zero-downtime PM2 process reload
+                                            echo "[INFO] Reloading PM2 process '${APP_NAME}' on ${ip}..."
+                                            ssh pbx@$ip "cd ${NODE_APP_ROOT} && pm2 reload ${APP_NAME} --env production || pm2 start build/index.js --name ${APP_NAME} --env production"
+
+                                            # 5. Cleanup older releases
+                                            ssh pbx@$ip "cd ${BASE_REL_PATH}/express/${APP_NAME} && ls -dt */ | tail -n +$((${KEEP_RELEASES} + 1)) | xargs -I {} rm -rf {}"
+
+                                            echo "[SUCCESS] Node.js host ${ip} successfully updated to release #${BUILD_NUMBER}."
+                                        done
+                                    '''
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // =============================================================
+                // 3. TOMCAT JAVA BACKEND PIPELINE
+                // =============================================================
+                stage('Tomcat Java Backend') {
+                    when { expression { return params.DEPLOY_TOMCAT } }
+                    steps {
+                        script {
+                            echo "[INFO] Packaging Tomcat WAR artifact..."
+                        }
+                        dir('tomcat-backend') {
+                            sh './mvnw clean package -DskipTests'
+
+                            sshagent([env.SSH_CRED_ID]) {
+                                sh '''
+                                    set -e
+                                    TOMCAT_WEBAPPS="${BASE_LB_PATH}/tomcat/webapps"
+                                    REL_DIR="${BASE_REL_PATH}/tomcat/${APP_NAME}/${BUILD_NUMBER}"
+
+                                    for ip in $(echo $TOMCAT_SERVERS | tr "," " "); do
+                                        echo "-------------------------------------------------------"
+                                        echo "[INFO] Deploying WAR Release #${BUILD_NUMBER} to Tomcat Host: ${ip}"
+                                        echo "-------------------------------------------------------"
+
+                                        # 1. Copy WAR to releases archive
+                                        ssh -o StrictHostKeyChecking=no pbx@$ip "mkdir -p ${REL_DIR}"
+                                        scp target/*.war pbx@$ip:${REL_DIR}/${APP_NAME}.war
+
+                                        # 2. Deploy WAR file to active webapps directory
+                                        echo "[INFO] Transferring WAR package to active webapps folder..."
+                                        scp target/*.war pbx@$ip:${TOMCAT_WEBAPPS}/${APP_NAME}.war
+
+                                        # 3. Cleanup older releases
+                                        ssh pbx@$ip "cd ${BASE_REL_PATH}/tomcat/${APP_NAME} && ls -dt */ | tail -n +$((${KEEP_RELEASES} + 1)) | xargs -I {} rm -rf {}"
+
+                                        echo "[SUCCESS] Tomcat Host ${ip} successfully updated."
+                                    done
+                                '''
+                            }
+                        }
+                    }
+                }
+
+            }
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // POST-EXECUTION LOGGING & NOTIFICATIONS
+    // -------------------------------------------------------------------------
+    post {
+        always {
+            echo "[PIPELINE COMPLETE] Pipeline execution finished for build #${BUILD_NUMBER}."
+        }
+        success {
+            echo "[DEPLOYMENT SUCCESS] All targeted components successfully deployed and linked to release #${BUILD_NUMBER}."
+        }
+        failure {
+            echo "[DEPLOYMENT FAILED] Pipeline encountered errors! Inspect stage logs above for details."
+        }
+    }
+}
