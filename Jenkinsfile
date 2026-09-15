@@ -55,7 +55,7 @@ pipeline {
                     
                     sh 'node -v'
                     sh 'npm -v'
-                    sh 'npm ci'
+                    //sh 'npm ci'
                     sh 'npm run build'
                 }
             }
