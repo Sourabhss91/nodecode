@@ -48,12 +48,16 @@ pipeline {
                 echo "=========================================================="
                 echo "[INFO] Building Node.js Application '${params.APP_NAME}' (Build #${BUILD_NUMBER})"
                 echo "=========================================================="
-                echo "[INFO] Node version in Jenkins:"
-                sh 'node -v'
-                sh 'npm -v'
-                // Clean install dependencies and run build script (e.g., tsc or esbuild)
-                //sh 'npm ci'
-                sh 'npm run build'
+                
+                // Change directory to the specific service folder (e.g., crm_api or kservices_ts_api)
+                dir("${params.APP_NAME}") {
+                    echo "[INFO] Current working directory: ${pwd()}"
+                    
+                    sh 'node -v'
+                    sh 'npm -v'
+                    sh 'npm ci'
+                    sh 'npm run build'
+                }
             }
         }
 
@@ -64,12 +68,14 @@ pipeline {
             steps {
                 echo "[INFO] Creating release directory at: ${env.RELEASE_PATH}"
                 
-                // 1. Create target release and load balancer directories if they don't exist
+                // 1. Create target release and load balancer directories
                 sh "mkdir -p ${env.RELEASE_PATH} ${env.TARGET_APP_ROOT}"
 
-                // 2. Copy compiled build files to the local release directory
+                // 2. Copy compiled files from the sub-folder build directory
                 echo "[INFO] Copying compiled files to release directory..."
-                sh "cp -r build/* ${env.RELEASE_PATH}/"
+                dir("${params.APP_NAME}") {
+                    sh "cp -r build/* ${env.RELEASE_PATH}/"
+                }
 
                 // 3. Atomically switch the 'build' symlink to point to the new build folder
                 echo "[INFO] Atomically updating symlink: ${env.TARGET_APP_ROOT}/build -> ${env.RELEASE_PATH}"
