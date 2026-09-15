@@ -29,6 +29,7 @@ pipeline {
     // -------------------------------------------------------------------------
     environment {
         // Jenkins Secret File Credential ID containing the production .env file
+        PATH = "/root/.nvm/versions/node/v22.21.1/bin:${env.PATH}"
         ENV_SECRET_ID  = "express-${params.APP_NAME}-env-prod"
 
         // Base Paths on the local VM
@@ -47,7 +48,9 @@ pipeline {
                 echo "=========================================================="
                 echo "[INFO] Building Node.js Application '${params.APP_NAME}' (Build #${BUILD_NUMBER})"
                 echo "=========================================================="
-                
+                echo "[INFO] Node version in Jenkins:"
+                sh 'node -v'
+                sh 'npm -v'
                 // Clean install dependencies and run build script (e.g., tsc or esbuild)
                 //sh 'npm ci'
                 sh 'npm run build'
